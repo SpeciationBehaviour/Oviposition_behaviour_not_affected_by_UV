@@ -1,0 +1,1646 @@
+---
+title: "Oviposition behaviour is not affected by ultraviolet light in a butterfly with sexually-dimorphic expression of a UV-sensitive opsin"
+author: "Jose Borrero"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    fig_caption: yes
+    keep_tex: yes
+  word_document: default
+header-includes:
+- \usepackage{float}
+- \setcounter{section}{1}
+- \setcounter{page}{37}
+fontsize: 9pt
+geometry: margin=1in
+graphics: yes
+---
+
+```{r message=FALSE} 
+library(cowplot)
+library(effects)
+library(emmeans)
+library(formatR)
+library(ggimage)
+library(ggResidpanel)
+library(ggspectra)
+library(gridExtra)
+library(jpeg)
+library(knitr)
+library(lme4)
+library(pavo)
+library(pbkrtest)
+library(photobiology)
+library(photobiologyWavebands)
+library(readr)
+library(rmarkdown)
+library(tidyverse)
+library(yaml)
+
+knitr::opts_chunk$set(echo=T,
+                      eval=T, 
+                      message = F,
+                      warning=F, 
+                      error = F,
+                      cache = F, 
+                      tidy = T, 
+                      size="footnotesize",
+                      fig.show = "hide",
+                      fig.pos='H',
+                      #results='hide',
+                      fig.lp='fig:',
+                      fig.align = 'center',
+                      fig.path='figures/example-', 
+                      cache.path = 'cache/example-',
+                      tidy.opts=list(width.cutoff=60)
+                     )
+```
+# 1 Figures
+All figures were created with the ggplot package and used the following theme:
+```{r Themes figures}
+require(grid)
+pub<- theme_update(
+  panel.grid.major=element_line(colour=NA),
+  panel.grid.minor=element_line(colour=NA),
+  panel.background = element_rect(colour = NA,fill=NA,size=1),
+  panel.border = element_rect(linetype = "solid", colour = "gray47",fill=NA),
+  axis.line.x = element_line(color="black"),
+  axis.line.y = element_line(color="black"),
+  axis.title.x=element_text(size=12,face="bold",hjust=0.5,vjust=0.5,angle=0),
+  axis.title.y=element_text(size=12,face="bold",hjust=0.5,vjust=0.5,angle=90),
+  axis.text.x=element_text(colour="black",angle=0,size=12),
+  axis.text.y=element_text(colour="black",angle=0,size=12),
+  axis.ticks=element_line(colour="black",size=1))
+## Color optins ----
+cl_uv <- c("darkgrey", "darkorchid3")
+filtercolors_no <- c("grey", "darkorchid3")
+opsincolors2 <- c("darkorchid4", "darkorchid", "blue", "green3", "red")
+part_colors2 <- c("olivedrab4", "green4", "gray8", "olivedrab3")
+part_colors3 <- c("gray86", "gray86", "gray86", "gray86", "olivedrab4", "azure3", "green4", "gray8")
+weather_col <- c("deepskyblue4", "deepskyblue3", "deepskyblue")
+
+```
+## 1.1. Figure 1: Overview of the experimental setup. (A) Heliconius erato cyrbia female attempting to lay an egg on a Passiflora puctata shoot. (B) Parts of hostplant P. punctata, where H. erato lay eggs. (C) Protocol of behavioural experiment.
+```{r}
+
+cyrbia_ovipositing <- readJPEG("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/1A_cyrbia_ovipositing.jpeg")
+
+plant_parts <- readJPEG("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/1B_plant_parts.jpeg")
+
+exp_protocol <- readJPEG("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/1C_exp_protocol.jpeg")
+
+
+Figure_1 <- ggdraw() + 
+  annotation_raster(cyrbia_ovipositing, xmin = 0, xmax = 0.5 , ymin =0.3, ymax = 1) +
+  annotation_raster(plant_parts,  xmin = 0.5, xmax = 1, ymin =0.3, ymax = 1) +
+  annotation_raster(exp_protocol,  xmin = 0, xmax = 1, ymin =0, ymax = 0.4) +
+  draw_plot_label(c("A","B","C"), x = c(0, 0.5, 0), y = c(0.98, 0.98, 0.38),
+                  size = 15, vjust = 1, color = c("white", "black", "black"))
+
+Figure_1
+
+# Save the plot with high DPI
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Figure_1.pdf",
+       plot = Figure_1, width = 210, height = 148, units = "mm", dpi = 500)
+
+```
+
+## 1.2 Figure 2: UV manipulation did not affect the (A) number of oviposition attempts or (B) the number of eggs laid on the hostplant. Grey boxes represent number of attempts/eggs in the control treatment (UV+) and purple boxes represent the number of eggs/attempts in the UV- light environment. 
+```{r Figure 2}
+#Load UV_Oviposition experiment ----
+setwd("/Users/jabm/Documents/Manuscript_UV_oviposition/Raw_files/")
+
+Oviposition <- read.csv2("/Users/jabm/Documents/Manuscript_UV_oviposition/Raw_files/UV_oviposition.csv", 
+                        header = T, stringsAsFactors = T, sep = ",") %>% 
+  mutate_at(c("Cohort", "Cage"), factor) %>% 
+  dplyr::mutate(across("Treatment", str_replace,  "UV", "UV-"))%>% 
+  dplyr::mutate(across("Treatment", str_replace,  "Clear", "UV+")) %>% 
+  mutate_at("Treatment", factor)
+
+
+str(Oviposition)
+summary(Oviposition)
+
+#Theme options
+uv_cl <- c("darkorchid3","darkgrey")
+## Per day ind ----
+Oviposition_day <- Oviposition %>% 
+  filter(Attempt != "NA") %>% # Filter out where no individual or attempt
+  group_by(Date, Day, Cohort, Group,Cage, Enviroment, Weather, Treatment, Species, Individual) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T)) %>% 
+  mutate(Egg_attempt = (sum_egg/ sum_attempt),
+         T = sum_egg,
+         F = (sum_attempt- sum_egg)) %>%
+  arrange(Group, Cohort, Individual, Date)
+## Boxplot Egg and attempt treatment ----
+
+# Add ns_lines between cyrbia and himera
+attempt_ns_lines <- data.frame(
+  Species = c("cyrbia_himera"),
+  Treatment = c("UV-UV+"),
+  x = c(1.5),
+  y = c(26),
+  label = c("n.s.")
+)
+
+# Create a data frame for the lines and text annotations
+attempt_ns_lines_2 <- data.frame(
+  Species = c("cyrbia", "himera", "cyrbia", "himera"),
+  Treatment = c("UV-", "UV-", "UV+", "UV+"),
+  x = c(1, 2),
+  y = c(20, 20),
+  label = c("n.s.", "n.s.")
+)
+
+# Plot the boxplot and add lines and text annotations
+Attempt_count_boxplot <- ggplot(data = Oviposition_day, aes(x = Species, y = sum_attempt, fill = Treatment)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.7), aes(fill = Treatment), pch = 21, alpha = 0.4) +
+  scale_y_continuous(name = "Attempt number") +
+  scale_x_discrete(labels = c(expression(italic("H. e. cyrbia")), expression(italic("H. himera")))) +
+  scale_fill_manual(values = uv_cl) + 
+  theme(legend.position = c(0.95, 0.80),
+        legend.background = element_rect(colour = 'grey50'),
+        legend.title = element_text(size = 9),
+        legend.key.size = unit(0.6, "cm"),
+        legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm")) +
+  geom_segment(data = attempt_ns_lines,
+               aes(x = x - 0.6, xend = x + 0.6, y = y + 0.5, yend = y + 0.5),
+               inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = attempt_ns_lines,
+            aes(x = x, y = y + 1.5, label = label),
+            size = 6,
+            inherit.aes = FALSE,
+            vjust = -0.5, color = "gray74") +
+  geom_segment(data = attempt_ns_lines_2,
+               aes(x = x - 0.2, xend = x + 0.2, y = y + 0.5, yend = y + 0.5),
+               inherit.aes = FALSE,
+               size = 0.5, color = "gray74") +
+  geom_text(data = attempt_ns_lines_2,
+            aes(x = x, y = y + 1.5, label = label), size = 6, inherit.aes = FALSE,vjust = -0.5, color = "gray74")
+
+Attempt_count_boxplot
+
+# Add egg_ns_lines between cyrbia and himera
+egg_ns_lines <- data.frame(
+  Species = c("cyrbia_himera"),
+  Treatment = c("UV-UV+"),
+  x = c(1.5),
+  y = c(7.5),
+  label = c("n.s."))
+
+# Create a data frame for the lines and text annotations
+egg_ns_lines_2 <- data.frame(
+  Species = c("cyrbia", "himera", "cyrbia", "himera"),
+  Treatment = c("UV-", "UV-", "UV+", "UV+"),
+  x = c(1, 2),
+  y = c(6, 6),
+  label = c("n.s.", "n.s."))
+
+# Plot the boxplot and add lines and text annotations
+Egg_count_boxplot <- ggplot(data = Oviposition_day, aes(x = Species, y = sum_egg, fill = Treatment)) + 
+  geom_boxplot() +
+  geom_point(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.7), aes(fill = Treatment), pch = 21, alpha = 0.4) +
+  scale_y_continuous(name = "Egg number") +
+  scale_x_discrete(labels = c(expression(italic("H. e. cyrbia")), expression(italic("H. himera")))) +
+  scale_fill_manual(values = uv_cl) + 
+  scale_color_manual(values = c("black", "black")) +
+  theme(legend.position = "none") +
+  geom_segment(data = egg_ns_lines, aes(x = x - 0.6, xend = x + 0.6, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = egg_ns_lines, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") +
+  geom_segment(data = egg_ns_lines_2, aes(x = x - 0.2, xend = x + 0.2, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") + 
+  geom_text(data = egg_ns_lines_2, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74")
+
+Egg_count_boxplot
+
+
+Figure_2 <- ggdraw() + draw_plot(Attempt_count_boxplot, x= 0 , y= 0.5, width = 1, height = 0.5) + draw_plot(Egg_count_boxplot, x= 0 , y= 0, width = 1, height = 0.5) + draw_plot_label(c("A","B"), x = c(0, 0), y = c(0.98, 0.5), size=15, vjust=1 )
+
+Figure_2
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Figure_2.pdf",
+       plot = Figure_2, width = 210, height = 210, units = "mm",
+       dpi = 500)
+
+```
+## 1.3 Figure 3: (A) Number of oviposition attempts per weather category (B) Number of eggs laid per weather category. 
+```{r Figure 3}
+## Per day ind  modified weather caterogires----
+#CHANGE WEATHER CATEGORIES TO HAVE SUNNY, CLOUDY & OVERCAST
+Oviposition_day2 <- Oviposition_day
+Oviposition_day2$Weather <- dplyr::recode(Oviposition_day2$Weather, under50 = "sunny", over50 = "cloudy")  
+## Supplementary boxplot weather ----
+weather_col <- c("deepskyblue4", "deepskyblue3", "deepskyblue")
+#change order of boxplots
+Oviposition_day2$Weather <- factor(Oviposition_day2$Weather,
+                       levels = c('overcast','cloudy', "sunny"),ordered = TRUE)
+
+# Add attempt_weather_ns_lines between overcast and cloudy
+attempt_weather_ns_lines_1 <- data.frame(
+  Weather = c("overcast", "cloudy"),
+  x = c(1.5),
+  y = c(20),
+  label = c("n.s."))
+
+# Add attempt_weather_ns_lines between cloudy and sunny
+attempt_weather_ns_lines_2 <- data.frame(
+  Weather = c("cloudy", "sunny"),
+  x = c(2.5),
+  y = c(20),
+  label = c("n.s."))
+
+# Add attempt_weather_sig_lines between overcast and sunny
+attempt_weather_sig_lines <- data.frame(
+  Weather = c("overcast", "sunny"),
+  x = c(2),
+  y = c(25),
+  label = c("*"))
+
+Attempt_weather_boxplot <- Oviposition_day2 %>% 
+  ggplot(aes(x= Weather, y= sum_attempt, fill= Weather )) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.9, dodge.width = 1), aes(fill = Weather), pch = 21, alpha = 0.4) +
+  scale_y_continuous(name="Attempt number") +
+  scale_fill_manual(values = weather_col) +
+  theme(legend.position="none") +
+  geom_segment(data = attempt_weather_ns_lines_1, aes(x = x - 0.4, xend = x + 0.2, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = attempt_weather_ns_lines_1, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") +
+  geom_segment(data = attempt_weather_ns_lines_2, aes(x = x - 0.2, xend = x + 0.4, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = attempt_weather_ns_lines_2, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") +
+  geom_segment(data = attempt_weather_sig_lines, aes(x = x - 0.9, xend = x + 0.9, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = attempt_weather_sig_lines, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") 
+
+Attempt_weather_boxplot
+
+# Add egg_weather_ns_lines between overcast and cloudy
+egg_weather_ns_lines_1 <- data.frame(
+  Weather = c("overcast", "cloudy"),
+  x = 1.5, y = 6,
+  label = c("n.s."))
+
+# Add egg_weather_ns_lines between cloudy and sunny
+egg_weather_ns_lines_2 <- data.frame(
+  Weather = c("cloudy", "sunny"),
+  x = 2.5, y = 6,
+  label = c("n.s."))
+
+# Add egg_weather_sig_lines between overcast and sunny
+egg_weather_sig_lines <- data.frame(
+  Weather = c("overcast", "sunny"),
+  x = 2, y = 7.5, label = c("**"))
+
+Egg_weather_boxplot <- Oviposition_day2 %>% 
+  ggplot(aes(x= Weather, y= sum_egg, fill= Weather)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.9, dodge.width = 1), aes(fill = Weather), pch = 21, alpha = 0.4) +
+  scale_y_continuous(name="Egg number") +
+  scale_fill_manual(values = weather_col) +
+  theme(legend.position="none") +
+  geom_segment(data = egg_weather_ns_lines_1, aes(x = x - 0.4, xend = x + 0.2, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = egg_weather_ns_lines_1, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") +
+  geom_segment(data = egg_weather_ns_lines_2, aes(x = x - 0.2, xend = x + 0.4, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = egg_weather_ns_lines_2, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") +
+  geom_segment(data = egg_weather_sig_lines, aes(x = x - 0.9, xend = x + 0.9, y = y + 0.5, yend = y + 0.5), inherit.aes = FALSE, size = 0.5, color = "gray74") +
+  geom_text(data = egg_weather_sig_lines, aes(x = x, y = y + 0.8, label = label), size = 6, inherit.aes = FALSE, vjust = -0.5, color = "gray74") 
+
+Egg_weather_boxplot
+
+Figure_3 <- ggdraw() + draw_plot(Attempt_weather_boxplot, x= 0 , y= 0.5, width = 1, height = 0.5) + draw_plot(Egg_weather_boxplot, x= 0 , y= 0, width = 1, height = 0.5) + draw_plot_label(c("A","B"), x = c(0, 0), y = c(1, 0.5), size=15, vjust=1 )
+
+Figure_3
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Figure_3.pdf",
+       plot = Figure_3, width = 210, height = 210, units = "mm",
+       dpi = 500)
+```
+## 1.4 Figure 4: Total number of (A) oviposition attempts and (B) eggs per plant part, throughout the behavioural experiment.
+```{r Figure 4}
+## Per part ----
+Oviposition_part <- Oviposition %>% 
+  dplyr::filter(Plant_part != "NA", Attempt != "NA") %>%  # Filter out where no plant part
+  group_by(Treatment, Plant_part) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            mean_attempt = mean(Attempt, na.rm = T),
+            sd_attempt = sd(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T),
+            mean_egg = mean(Egg, na.rm = T),
+            sd_egg = sd(Egg, na.rm = T),
+            mean_first_attempt = mean(First_attempt_minutes, na.rm = T),
+            mean_first_egg = mean(First_egg_minutes, na.rm = T))  %>% 
+  mutate(Egg_attempt = sum_egg/sum_attempt) %>% 
+  arrange(Plant_part)
+## Barplot plantpart egg and attempt ----
+part_colors2 <- c("olivedrab4", "green4", "gray8", "olivedrab3")
+Attempt_part <- Oviposition_part  %>% 
+  ggplot(aes(x= Plant_part, y= sum_attempt, fill= Plant_part)) +
+  geom_bar(stat="identity", position = "dodge") +
+  scale_fill_manual(values= part_colors2) +
+  scale_x_discrete(name="Plant part") +
+  scale_y_continuous(name="Attempt number") +
+  theme(legend.position="none")
+Egg_part <- Oviposition_part  %>% 
+  ggplot(aes(x= Plant_part, y= sum_egg, fill= Plant_part)) + 
+  geom_bar(stat="identity", position = "dodge") +
+  scale_fill_manual(values= part_colors2) +
+  scale_y_continuous(name = "Egg number") +
+  scale_x_discrete(name="Plant part") +
+  theme(legend.position="none")
+
+plot_grid(Attempt_part, Egg_part, nrow =2)
+
+Figure_4 <- ggdraw() + draw_plot(Attempt_part, x= 0 , y= 0.5, width = 1, height = 0.5) + draw_plot(Egg_part, x= 0 , y= 0, width = 1, height = 0.5) + draw_plot_label(c("A","B"), x = c(0, 0), y = c(0.98, 0.5), size=15, vjust=1 )
+
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Figure_4.pdf",
+       plot = Figure_4, width = 210, height = 210, units = "mm",
+       dpi = 500)
+```
+
+## 1.5 Figure 5: A) Reflectance spectra of hostplant parts Passiflora punctata. Reflectance spectra of different plant parts: leaf (dark green), white patches on leaf (grey), shoot (light green), stem (black). Grey lines on background indicate the normalized spectral sensitivities of H. erato females UVRh1, UVRh2, blue BRh and long wavelength LWRh. Shaded areas represent ± one standard error. B) Quantum catch estimates of the female H. erato visual system when viewing the shoots of P. punctata against a green foliage background. Quantum catches were calculated for each opsin UVRh1, UVRh2, BRh1 and LWRh including the red ‘receptor’, which results from red filtering pigments shifting the sensitivity of LWRh pigment toward longer wavelengths (Zaccardi et al 2006, McCulloch et al. 2021). Grey bars show quantum catch estimates under UV+ environment and purple bars show quantum catch estimates under UV- environment. Error bars represent ±standard error. 
+```{r Figure 5}
+# 1) Spectral sensitivity ----
+###H. erato female (without filter pigments ----
+#355, 390, 470, 555nm for McCulluch et al. 2016)
+erato_fem <- sensmodel(c(355, 390, 470, 555), range = c(300, 700))
+names(erato_fem) <- c("wl", "UVRh1", "UVRh2", "BRh", "LWRhgreen")
+erato_fem2 <- procspec(erato_fem, opt = c("maximum")) #normalize spectra by max of each column
+### H. erato male (without filtering pigments) ----
+# 390, 470, 555nm H. erato male (w/filtering pigments = 600; McCulluch et al. 2016)
+erato_male <- sensmodel(c(390, 470, 555), range = c(300, 700))
+names(erato_male) <- c("wl", "UVRh2", "BRh","LWRhgreen")
+erato_male2 <- procspec(erato_male, opt = c("maximum")) #normalize spectra by max of each column
+
+#Add sex column
+erato_fem_long <- erato_fem2
+colnames(erato_fem_long) <- c( "wl", "UVRh1_f", "UVRh2_f", "BRh_f", "LWRhgreen_f")
+erato_male_long <- erato_male2
+colnames(erato_male_long) <- c( "wl", "UVRh2_m", "BRh_m", "LWRhgreen_m")
+#inner join
+erato_sensitivities <- left_join(erato_fem_long, erato_male_long, by= "wl")
+#pivot longer
+erato_sensitivities_long <- erato_sensitivities %>% pivot_longer(cols= -wl,
+                                                                 names_to = c("opsin", "sex"),
+                                                                 names_sep = "_",
+                                                                 values_to = "Relative_sensitivity")
+
+### H. erato  with filtering pigments ----
+# H. erato female 355, 390, 470, 555nm for McCulluch et al. 2016)
+# for H. melpomene red filtering pigments = 590nm; McCulloch et al. 2021)
+#to include the sensitivity curve of the photoreceptors with red filtering pigments
+#import the "red_filter_curve" file (obtained from McColloch et al. 2021 via https://automeris.io/WebPlotDigitizer/)
+red <- read.csv("~/Documents/Manuscript_UV_oviposition/Raw_files/red_filter_curve_2.csv")
+#loess regression with span parameter 0 to 1; 0 = not smooth; 1 = very smooth
+regr1<-loess(red_filter~wavelength,data=red,span = 0.3) #span based on trial & error
+#Create 1000 estimates across range of wavelengths
+estimate_across<-seq(min(red$wavelength),
+                     max(red$wavelength),
+                     length.out = 1000)
+red_est<-predict(regr1,estimate_across,se = T)
+#plot it
+plot(red$wavelength,red$red_filter,pch=20)
+#add loess regression line
+lines(estimate_across,red_est$fit)
+#add standard error
+polygon(c(estimate_across,rev(estimate_across)),
+        c(red_est$fit-red_est$se.fit,rev(red_est$fit+red_est$se.fit)),
+        col=adjustcolor("black",0.2),border=NA)
+
+#Predict sensitivity values for all wavelengths 300-700nm; without standard error
+red_pred <-predict(regr1,c(300:700),se = F)
+#convert to a data frame
+red_pred <- as.data.frame(red_pred)
+#create a vector of wavelengths (300-700) & add to the dataframe
+vec <- c(300:700)
+red_pred$wl <- vec
+#rename & reorder the columns in the new data frame
+names(red_pred) <- c("LWRhred", "wl")
+red_pred <- red_pred[, c("wl","LWRhred")]
+#NAs were produced during prediction; replace with 0
+red_pred[is.na(red_pred)] <- 0
+#normalize the predicted curve by the max of each column & correct negative values
+red_pred2 <- procspec(red_pred, opt = c("maximum"),fixneg = c("zero")) 
+#is this now an rspec file type?
+is.rspec(red_pred2) #yes
+#plot(red_pred2)
+
+#add the sensitivity curve of the red filtering pigments to the H. melp sensmodel (created above = melp2)
+erato_fem_full <- merge(erato_fem2, red_pred2, by.x="wl")
+
+erato_male_full <- merge(erato_male2, red_pred2, by.x="wl")
+
+### Plot using ggplot ----
+#Add sex column
+erato_fem_full_long <- erato_fem_full
+colnames(erato_fem_full_long) <- c( "wl", "UVRh1_f", "UVRh2_f", "BRh_f", "LWRhgreen_f", "LWRhred_f")
+
+erato_male_full_long <- erato_male_full
+colnames(erato_male_full_long) <- c( "wl", "UVRh2_m", "BRh_m", "LWRhgreen_m", "LWRhred_m")
+
+#inner join
+erato_sensitivities_full <- left_join(erato_fem_full_long, erato_male_full_long, by= "wl")
+#pivot longer
+erato_sensitivities_full_long <- erato_sensitivities_full %>% pivot_longer(cols= -wl,
+                                                                           names_to = c("opsin", "sex"),
+                                                                           names_sep = "_",
+                                                                           values_to = "Relative_sensitivity")
+
+# 2)  Import reflectances ----
+punctata <- getspec(where="~/Documents/Manuscript_UV_oviposition/Masters_Thesis/Experiment_UV_ovipositon/Exp_hostplant_reflectance_tidy/punctata_reflectance_all",
+                    lim=c(300, 700))
+punctata <- procspec(punctata, opt = c("smooth"), fixneg= "zero") #smooth the data, setting negatives to zero
+is.rspec(punctata)
+
+### pivot longer for tidyverse ----
+punctata_long <- punctata %>% pivot_longer(cols= -wl,
+                                           names_to = c("species", "individual", "plant_part", "measurement"),
+                                           names_sep = "_", values_to = "reflectance") %>% 
+  mutate_at(c("species", "individual", "plant_part"), factor)
+
+#punctata_long <- read.csv2("/Users/jabm/Documents/Manuscript_UV_oviposition/Raw_files/punctata_long.csv", header = T, stringsAsFactors = T, sep = ",")
+
+### Get total averages ----
+punctata_avg <- punctata_long %>%  group_by(wl, species, plant_part,) %>% 
+  summarize(reflectance_avg = mean(reflectance), 
+            reflectance_std = sd(reflectance),
+            reflectance_se = sd(reflectance)/length(reflectance),
+            reflectance_upper = reflectance_avg + sd(reflectance)/length(reflectance),
+            reflectance_lower =  reflectance_avg - sd(reflectance)/length(reflectance))
+
+### Filter to get only shoots ----
+shoot_long <- punctata_long %>%  
+  dplyr::filter( plant_part  == "shoot")
+
+shoot_avg <- shoot_long %>%  group_by(wl, species) %>% 
+  summarize(reflectance_avg = mean(reflectance), 
+            reflectance_std = sd(reflectance),
+            reflectance_se = sd(reflectance)/length(reflectance),
+            reflectance_upper = reflectance_avg + sd(reflectance)/length(reflectance),
+            reflectance_lower =  reflectance_avg - sd(reflectance)/length(reflectance))
+summary(shoot_avg)
+
+# pivot wider for pavo
+shoot_wide <- shoot_long %>% 
+  dplyr::select(wl, species, individual, measurement, reflectance) %>% 
+  pivot_wider(names_from = c(species, individual, measurement),
+              names_sep = "_",
+              values_from = reflectance)
+#convert to pavo
+shoot_wide <- as.rspec(shoot_wide)
+is.rspec(shoot_wide)
+
+# get only average
+shoot_wide_avg <- aggspec(shoot_wide, FUN = mean)
+colnames(shoot_wide_avg) <- c("wl", "reflectance")
+shoot_wide_avg <- as.rspec(shoot_wide_avg)
+is.rspec(shoot_wide_avg)
+
+
+### Last plot with female spectral sensitivity ----
+colnames(punctata_avg)
+#change format of female erato sensitivity to be the same as punctata_avg to join both dataframes
+ferato_punctata_sensitivities_long <- erato_sensitivities_long %>%
+  dplyr::mutate(100* Relative_sensitivity)  %>% 
+  dplyr::filter( sex == "f") 
+ferato_punctata_sensitivities_long2 <- ferato_punctata_sensitivities_long[ ,c(1,3,2, 5)]
+colnames(ferato_punctata_sensitivities_long2) <- c("wl", "species", "plant_part", "reflectance_avg")
+
+#join two dataframes together
+ferato_punctata <- full_join(punctata_avg, ferato_punctata_sensitivities_long2,
+                             by = c("wl", "species", "plant_part", "reflectance_avg")) %>% 
+  mutate_at(c("species", "plant_part"), factor)
+
+str(ferato_punctata)
+
+### plot female spectral full ----
+
+#change format of female erato sensitivity to be the same as punctata_avg to join both dataframes
+ferato_punctata_sensitivities_long <- erato_sensitivities_full_long %>%
+  dplyr::mutate(100* Relative_sensitivity)  %>% 
+  dplyr::filter( sex == "f") 
+ferato_punctata_sensitivities_long2 <- ferato_punctata_sensitivities_long[ ,c(1,3,2, 5)]
+colnames(ferato_punctata_sensitivities_long2) <- c("wl", "species", "plant_part", "reflectance_avg")
+
+ferato_punctata_sensitivities_long2$plant_part <- factor(ferato_punctata_sensitivities_long2$plant_part,
+                                                         levels = c("UVRh1","UVRh2","BRh","LWRhgreen","LWRhred"),
+                                                         ordered = F)
+str(ferato_punctata_sensitivities_long2)
+#join two dataframes together
+ferato_punctata <- full_join(punctata_avg, ferato_punctata_sensitivities_long2,
+                             by = c("wl", "species", "plant_part", "reflectance_avg")) %>% 
+  mutate_at(c("species", "plant_part"), factor)
+
+str(ferato_punctata)
+
+#Plot
+levels(ferato_punctata$plant_part)
+part_colors2 <- c("gray86", "gray86", "gray86", "gray86","gray86", "olivedrab4", "azure3", "green4", "gray8")
+
+ferato_punctata_p2 <- ferato_punctata %>% 
+  ggplot(aes(x = wl, y = reflectance_avg, col = plant_part, linetype = plant_part)) + 
+  geom_line() +
+  scale_linetype_manual(values = c(2, 2, 2, 2, 2, 1, 1, 1, 1)) +
+  scale_color_manual(values = part_colors2) +
+  scale_x_continuous(name = "Wavelength (nm)", limits = c(300, 700), breaks = seq(300, 700, by = 50)) + 
+  scale_y_continuous(name = "Reflectance (%) / normalized sensitivity", limits = c(0, 105), breaks = seq(0, 100, by = 20)) +
+  theme(legend.position = c(0.5),
+        legend.background = element_rect(colour = 'grey50'),
+        legend.title = element_text(size = 0),
+        legend.key.size = unit(1, "cm"),
+        legend.text = element_text(size = 20),
+        legend.margin = margin(0),
+        legend.box.background = element_blank()) +
+  theme(legend.key = element_blank(),
+        plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm")) +
+  stat_wl_strip(ymin = -3, ymax = -0.5) + 
+  scale_fill_identity()  +
+  stat_wl_strip(ymin = -Inf, ymax = -0.025) +  
+  scale_fill_identity() + 
+  geom_text(aes(x = 355, y = 102, label = "UVRh1"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 390, y = 102, label = "UVRh2"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 470, y = 102, label = "BRh"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 555, y = 102, label = "LWRh-green"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 610, y = 102, label = "LWRh-red"), size = 3, vjust = -0.5, color = "black") + 
+  coord_fixed(ratio = 2)
+
+# 3) Import exp cages light irrad measurements ----
+Light_measure<- getspec(lim=c(300, 700), where = "~/Documents/Manuscript_UV_oviposition/Masters_Thesis/Experiment_UV_ovipositon/Exp_lightmeasures_tidy/Exp_lightmeasures_all")
+Light_measure <- procspec(Light_measure, opt = c("none"), fixneg= "zero") #smooth the data, setting negatives to zero
+is.rspec(Light_measure)
+#convert unit
+Light_measure <- irrad2flux(Light_measure)
+### Transform to pivot longer to be able to filter out and arrange data ----
+Light_measure_long <- Light_measure %>% pivot_longer(cols= -wl,
+                                                     names_to = c("direction", "measurement_nr","date", "time", "weather", "cage", "filter"),
+                                                     names_sep = "_",
+                                                     values_to = "irradiance") %>% 
+  mutate(across(c(direction, date, weather, cage, filter, measurement_nr), factor))
+
+#Light_measure_long <- read.csv2("/Users/jabm/Documents/Manuscript_UV_oviposition/Raw_files/Light_measure_long.csv", header = T, stringsAsFactors = T, sep = ",")
+
+# Take average from 3 measurements
+Light_measure_agg <- Light_measure_long %>%  group_by(wl, direction, date, weather, cage, filter) %>%
+  summarize(irradiance = mean(irradiance))
+# Make summary of weather, treatment, direction
+Light_weather <- Light_measure_long %>%  group_by(wl, direction, weather, filter) %>%
+  summarize(irradiance_avg = mean(irradiance), 
+            irradiance_std = sd(irradiance),
+            irradiance_se = sd(irradiance)/length(irradiance),
+            irradiance_upper = irradiance_avg + sd(irradiance)/length(irradiance),
+            irradiance_lower =  irradiance_avg - sd(irradiance)/length(irradiance))
+### Filter downwelling light under50 ----
+#in case you want to change to cloudy or something else just select all comandF and change under50 to overcast
+uv_down_overcast <- Light_weather %>% 
+  dplyr::filter(direction == "down", weather == "overcast", filter == "uv")
+clear_down_overcast <- Light_weather %>% 
+  dplyr::filter(direction == "down", weather == "overcast", filter == "clear")
+
+### change to pavo ----
+
+uv_down_overcast_wide <- uv_down_overcast[ , c(1, 5)]
+uv_down_overcast_wide <- as.rspec(uv_down_overcast_wide)
+is.rspec(uv_down_overcast_wide)
+
+clear_down_overcast_wide <- clear_down_overcast[ , c(1, 5)]
+clear_down_overcast_wide <- as.rspec(clear_down_overcast_wide)
+is.rspec(clear_down_overcast_wide)
+
+### normalize spectra ----
+uv_down_overcast_wide_norm <- procspec(uv_down_overcast_wide, opt = c("maximum"))
+colnames(uv_down_overcast_wide_norm) <- c("wl", "irradiance")
+is.rspec(uv_down_overcast_wide_norm)
+
+clear_down_overcast_wide_norm <- procspec(clear_down_overcast_wide, opt = c("maximum"))
+is.rspec(clear_down_overcast_wide_norm)
+colnames(clear_down_overcast_wide_norm) <- c("wl", "irradiance")
+
+
+# 4) Vismodel Herato f filtering pigment normalized illuminance ----
+### uv_down_overcast illuminance ----
+
+#erato female with with standard uv_down_under50 illuminance and green background
+#(homogeneous 1 across all wavelengths) and von Kris color correctionis.rspec(mp_red)
+
+vis_eratofull_uv_shoot_norm <- vismodel(shoot_wide, 
+                                        visual = erato_fem_full, achromatic = "all", 
+                                        illum = uv_down_overcast_wide_norm$irradiance, bkg = "green",
+                                        vonkries = F, relative = F) 
+summary(vis_eratofull_uv_shoot_norm)
+
+vis_eratofull_uv_shoot_avg_norm <- vis_eratofull_uv_shoot_norm %>% 
+  summarise( UVRh1_avg = mean(UVRh1),
+             UVRh1_SE = sd(UVRh1)/length(UVRh1),
+             UVRh2_avg = mean(UVRh1),
+             UVRh2_SE = sd(UVRh2)/length(UVRh2),
+             BRh_avg = mean(BRh), 
+             BRh_SE = sd(BRh)/length(BRh),
+             LWRhgreen_avg = mean(LWRhgreen),
+             LWRhgreen_SE = sd(LWRhgreen)/length(LWRhgreen),
+             LWRhred_avg = mean(LWRhred ),
+             LWRhred_SE = sd(LWRhred )/length(LWRhred),
+             lum_avg = mean(lum))
+vis_eratofull_uv_shoot_avg_norm
+
+
+vis_eratofull_uv_shoot_qcatch_norm <- vis_eratofull_uv_shoot_avg_norm %>% 
+  summarise( Total_qcatch = c(UVRh1_avg + UVRh2_avg + BRh_avg + LWRhgreen_avg + LWRhgreen_avg))
+vis_eratofull_uv_shoot_qcatch_norm
+
+### clear_down_overcast illuminance ----
+
+#erato female with with standard uv_down_under50 illuminance and green background
+#(homogeneous 1 across all wavelengths) and von Kris color correctionis.rspec(mp_red)
+
+vis_eratofull_clear_shoot_norm <- vismodel(shoot_wide, 
+                                           visual = erato_fem_full, achromatic = "all", 
+                                           illum = clear_down_overcast_wide_norm$irradiance, bkg = "green",
+                                           vonkries = F, relative = F) 
+summary(vis_eratofull_clear_shoot_norm)
+
+vis_eratofull_clear_shoot_avg_norm <- vis_eratofull_clear_shoot_norm %>%
+  summarise( UVRh1_avg = mean(UVRh1),
+             UVRh1_SE = sd(UVRh1)/length(UVRh1),
+             UVRh2_avg = mean(UVRh2),
+             UVRh2_SE = sd(UVRh2)/length(UVRh2),
+             BRh_avg = mean(BRh), 
+             BRh_SE = sd(BRh)/length(BRh),
+             LWRhgreen_avg = mean(LWRhgreen),
+             LWRhgreen_SE = sd(LWRhgreen)/length(LWRhgreen),
+             LWRhred_avg = mean(LWRhred ),
+             LWRhred_SE = sd(LWRhred )/length(LWRhred ),
+             lum_avg = mean(lum))
+vis_eratofull_clear_shoot_avg_norm
+
+vis_eratofull_clear_shoot_qcatch_norm <- vis_eratofull_clear_shoot_avg_norm %>% 
+  summarise( Total_qcatch = c(UVRh1_avg + UVRh2_avg + BRh_avg + LWRhgreen_avg + LWRhred_avg))
+vis_eratofull_clear_shoot_qcatch_norm
+
+
+### Plot and join vis_erato_clear_shoot_avg and vis_erato_uv_shoot_avg ----
+
+vis_eratofull_uv_shoot_avg_norm$filter <- ("UV-")
+vis_eratofull_clear_shoot_avg_norm$filter <- ("UV+")
+#join dataframes
+vis_eratofull_shoot_avg_norm <- full_join(vis_eratofull_uv_shoot_avg_norm, vis_eratofull_clear_shoot_avg_norm)
+#pivot pivot_longer qcatch values
+vis_eratofull_shoot_avg_long_norm <- vis_eratofull_shoot_avg_norm %>% 
+  pivot_longer(cols = -c(filter, lum_avg, UVRh1_SE, UVRh2_SE, BRh_SE, LWRhgreen_SE, LWRhred_SE), 
+               names_to = "opsin", 
+               values_to = "qcatch")
+#pivot pivot_longer SE values
+vis_eratofull_shoot_avg_long_norm <- vis_eratofull_shoot_avg_long_norm %>% 
+  pivot_longer(cols = -c(lum_avg, filter, opsin, qcatch), 
+               names_to = "opsin_SE", 
+               values_to = "qcatch_SE")
+#rearange columns
+vis_eratofull_shoot_avg_long2_norm <- vis_eratofull_shoot_avg_long_norm[ ,c(2,3,5,4,6,1)]
+#remove rows where opsin and opsin_SE are not the same opsin 
+vis_eratofull_shoot_avg_long3_norm <- vis_eratofull_shoot_avg_long2_norm[c(1, 7, 13, 19, 25, 26, 32, 38, 44, 50), ]
+
+#plot
+
+#option a per opsin
+opsincolors2 <- c("darkorchid4", "darkorchid", "blue", "green3", "red")
+
+vis_eratofull_shoot_avg_long3_norm$opsin <- factor(vis_eratofull_shoot_avg_long3_norm$opsin,
+                                                   levels = c('UVRh1_avg','UVRh2_avg', "BRh_avg", "LWRhgreen_avg", "LWRhred_avg"),
+                                                   ordered = TRUE)
+
+#option a per treatment
+cl_uv <- c("darkorchid3", "darkgrey")
+
+vis_eratofull_shoot_avg_norm_p2 <- vis_eratofull_shoot_avg_long3_norm %>% 
+  ggplot(aes(x = opsin, y = qcatch, 
+             ymax = qcatch + qcatch_SE, 
+             ymin = qcatch - qcatch_SE,
+             fill = filter)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_y_continuous(name = "Quantum catch") +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = cl_uv) +
+  theme(legend.position = c(0.1, 0.80),
+        legend.background = element_rect(colour = 'grey50'),
+        legend.title = element_text(size = 9),
+        legend.key.size = unit(0.6, "cm"),
+        legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm")) +
+  scale_x_discrete(labels = c(expression(italic("UVRh1")), expression(italic("UVRh2")), expression(italic("BRh")), expression(italic("LWRh-green")), expression(italic("LWRh-red")))) +
+  coord_fixed(ratio = 0.35)  # Adjust the ratio as needed
+
+Figure_5 <- ggdraw() + draw_plot(vis_eratofull_shoot_avg_norm_p2, x = 0 , y = 0, width = 1, height = 0.5) + 
+  draw_plot(ferato_punctata_p2, x = 0 , y = 0.5, width = 1, height = 0.5) +
+  draw_plot_label(c("A", "B"), x = c(0.15, 0.15), y = c(0.98, 0.5), size = 15, vjust = 1)
+
+Figure_5
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Figure_5.pdf",
+       plot = Figure_5, width = 297, height = 210, units = "mm",
+       dpi = 500)
+
+```
+
+
+
+## 1.6 Supplementary Figure 1 Normalized spectral sensitivities of Heliconius erato. (B)  Males possess opsins with peak sensitivities: UV 390 nm (UVRh2), blue 470 nm (BRh) and long wavelength 555 nm (LWRh) (A) Females possess an additional UV opsin (UVRh1) that has a peak sensitivity at 355 nm. Additionally, H. erato possess a fifth receptor class, with a peak at ∼600 nm due to filtering of the green rhodopsin by a red filtering pigment (red dashed line, from McCulloch et al. 2021).  
+```{r Supplementary Figure 1 }
+
+#Plot by sex
+opsincolors2 <- c("darkorchid4", "darkorchid", "blue", "green3", "red")
+
+erato_sensitivities_full_long <- erato_sensitivities_full_long %>%
+    mutate(opsin = factor(opsin,
+                          levels = c("UVRh1", "UVRh2", "BRh", "LWRhgreen", "LWRhred"),
+                          ordered = TRUE))
+  
+erato_sensitivities_full_p <- erato_sensitivities_full_long %>% 
+  ggplot(aes(x=wl, y=(Relative_sensitivity), group=opsin)) +
+  geom_line(aes(linetype=opsin, color=opsin, size=opsin)) +
+  scale_linetype_manual(values=c("solid","solid","solid", "solid", "dashed")) +
+  scale_color_manual(values= opsincolors2) + 
+  scale_size_manual(values=c(1,1,0.5,0.5,0.5)) +
+  scale_x_continuous(name="Wavelength (nm)", limits=c(300,700), breaks=seq(300, 700, by=50)) + 
+  scale_y_continuous(name="Sensitivity", limits=c(0,1.1), breaks=seq(0, 1, by=0.2)) +
+  theme(legend.position= "none") +
+  facet_grid(rows= "sex") +
+  stat_wl_strip(ymin = -Inf, ymax = -0.025) +  
+  scale_fill_identity() + 
+  geom_text(aes(x = ifelse(sex == "f", 355, NA), 
+                y = ifelse(sex == "f", 1.05, NA), 
+                label = ifelse(sex == "f", "UVRh1", NA)), 
+            size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 390, y = 1.05, label = "UVRh2"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 470, y = 1.05, label = "BRh"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 555, y = 1.05, label = "LWRh-green"), size = 3, vjust = -0.5, color = "black") +
+  geom_text(aes(x = 610, y = 1.05, label = "LWRh-red"), size = 3, vjust = -0.5, color = "black")
+
+erato_sensitivities_full_p
+  
+
+Supplementary_1 <- plot_grid(erato_sensitivities_full_p)
+  
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_1.pdf",plot = Supplementary_1, width = 210, height = 210, units = "mm",
+         dpi = 500)
+
+```
+## 1.7 Supplementary Figure 2: Experimental cage set up. (A) Schematic view of the cage used for the behavioural experiment.  Cage on the top left shows experimental cage under UV- absent conditions when fitted with a UV-blocking filter. Cage on the top right shows experimental cage under UV+ present conditions, when fitted with a clear filter. Filters were placed on the east and south-ward facing sides of the cage which received most of the incoming natural sunlight. (B) Picture of the experimental cage fitted with UV-blocking filter with a Passiflora punctata hostplant.
+```{r}
+
+S2A_expcage <- readJPEG("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/S2A_expcage.jpeg")
+S2B_cage <- readJPEG("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/S2B_cage.jpeg")
+
+Supplementary_2 <- ggdraw() + 
+  annotation_raster(S2B_cage, xmin = 0, xmax = 1, ymin = 0, ymax = 0.5) +
+  annotation_raster(S2A_expcage, xmin = 0, xmax = 1, ymin = 0.5, ymax = 1) +
+  draw_label("A", x = 0.05, y = 0.98, size = 15, vjust = 1) +
+  draw_label("B", x = 0.05, y = 0.48, size = 15, vjust = 1, color="white")
+
+Supplementary_2
+
+# Save the plot with high DPI
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_2.pdf",
+       plot = Supplementary_2, width = 210, height = 297, units = "mm",
+       dpi = 500)
+
+```
+
+## 1.8 Supplementary Figure 3: Experimental light irradiance in the UV-Vis range in the under different weather conditions. Violet line represents irradiance in cage with UV-blocking filter UV-absent, grey line represents irradiance in the cage with clear filter UV-present. Shaded areas represent ± one standard error. Left column shows the irradiance spectra under overcast conditions (100% cloud coverage), middle column shows the irradiance spectra under cloudy conditions (>50% c.c.) and right column shows the irradiance under sunny conditions (<50 % c.c.). Top three rows show sides of the cage fitted with filters (1) downwelling, (2) side-welling out (southeast facing) (3) side-welling left (east facing). Bottom two rows show sides of the cages that were not fitted with filters (4) side-welling in (north facing) & sidewelling right (northwest facing).
+```{r Supplementary Fig 3}
+## Supplementary UV filtering complete spectrum all directions ----
+# Experimental cages light measurements ----
+Light_measure<- getspec(lim=c(300, 700), 
+                        where = "~/Documents/Manuscript_UV_Oviposition/Masters_Thesis/Experiment_UV_ovipositon/Exp_lightmeasures_tidy/Exp_lightmeasures_all")
+Light_measure <- procspec(Light_measure, opt = c("none"), fixneg= "zero") #smooth the data, setting negatives to zero
+is.rspec(Light_measure)
+#convert unit
+Light_measure <- irrad2flux(Light_measure)
+#Transform to pivot longer to be able to filter out and arrange data
+Light_measure_long <- Light_measure %>% pivot_longer(cols= -wl,
+                                                     names_to = c("direction", "measurement_nr","date", "time", "weather", "cage", "filter"),
+                                                     names_sep = "_",
+                                                     values_to = "irradiance") %>% 
+  mutate(across(c(direction, date, weather, cage, filter, measurement_nr), factor))
+
+#write.csv2(Light_measure_long,'~/Documents/Manuscript_UV_Oviposition/Raw_files/"Light_measure_long.csv')
+# Take average from 3 measurements
+Light_measure_agg <- Light_measure_long %>%  group_by(wl, direction, date, weather, cage, filter) %>%
+  summarize(irradiance = mean(irradiance))
+## Make summary of weather, treatment, direction----
+directions_order <- c("down", "left", "out", "in", "right")
+weather_order <- c("overcast", "over50", "under50")
+
+
+Light_weather <- Light_measure_long %>%  group_by(wl, direction, weather, filter) %>%
+  summarize(irradiance_avg = mean(irradiance), 
+            irradiance_std = sd(irradiance),
+            irradiance_se = sd(irradiance)/length(irradiance),
+            irradiance_upper = irradiance_avg + sd(irradiance)/length(irradiance),
+            irradiance_lower =  irradiance_avg - sd(irradiance)/length(irradiance))  %>%
+  dplyr::mutate(direction = factor(direction, levels = directions_order)) %>%
+  dplyr::mutate(weather = factor(weather, levels = weather_order))
+
+summary(Light_weather)
+## UV filtering all directions ----
+
+filtercolors_no <- c("grey", "darkorchid3")
+
+# Modify the names of the levels for direction and weather
+direction_labels <- c("Downwelling", "Sidewelling-left", "Sidewelling-out", "Sidewelling-in", "Sidewelling-right")
+weather_labels <- c("overcast (100% cloud cover)", "cloudy (>50% c.c.)", "sunny (<50% c.c.)")
+
+Light_weather_directions <- Light_weather %>%
+  filter(filter != "no") %>%
+  ggplot(aes(x = wl, y = irradiance_avg, col = filter)) +
+  geom_line() +
+  scale_color_manual(values = filtercolors_no) +
+  scale_x_continuous(name = "Wavelenght (nm)", limits=c(295,705),breaks = seq(300, 700, by=100)) +
+  scale_y_continuous(
+    name = expression(bold("Light intensity " ~ "µmol/m"^2 ~ s)),  # Updated y-axis label with bold formatting
+    labels = function(x) format(x, scientific = FALSE)  # Prevent scientific notation on y-axis tick labels
+  ) +
+  theme(legend.key = element_blank()) +
+  theme(plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm")) +
+  stat_wl_strip(ymin = -Inf, ymax = -0.025) +
+  scale_fill_identity() +
+  theme(
+    legend.position = c(0.73, 0.95),
+    legend.background = element_rect(colour = 'grey50'),
+    legend.title = element_text(size = 9),
+    legend.key.size = unit(0.45, "cm"),
+    legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm"),
+    strip.background = element_blank(), 
+    strip.text.x = element_text(size = 10),
+    strip.text.y = element_text(size = 10)
+  ) +
+  geom_ribbon(aes(ymax = irradiance_upper, ymin = irradiance_lower), alpha = 0.5) +
+  facet_grid(vars(factor(direction, labels = direction_labels)), vars(factor(weather, labels = weather_labels)), scales = "free")
+
+Light_weather_directions
+
+Supplementary_3 <- Light_weather_directions
+
+Supplementary_3
+
+# Save the plot with high DPI
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_3.pdf",
+       plot = Supplementary_3, width = 210, height = 297 , units = "mm",
+       dpi = 500)
+
+```
+## 1.2 Supplementary 4 Light irradiance in the UV range in the experimental cages in different weather conditions. Violet line represents irradiance in cage with UV-blocking filter UV-, grey line represents irradiance in the cage with clear filter UV+. Shaded areas represent ± one standard error.
+```{r Supplementary 4}
+# Experimental cages light measurements ----
+Light_measure<- getspec(lim=c(300, 700), 
+                        where = "~/Documents/Manuscript_UV_Oviposition/Masters_Thesis/Experiment_UV_ovipositon/Exp_lightmeasures_tidy/Exp_lightmeasures_all")
+Light_measure <- procspec(Light_measure, opt = c("none"), fixneg= "zero") #smooth the data, setting negatives to zero
+is.rspec(Light_measure)
+#convert unit
+Light_measure <- irrad2flux(Light_measure)
+#Transform to pivot longer to be able to filter out and arrange data
+Light_measure_long <- Light_measure %>% pivot_longer(cols= -wl,
+                                                           names_to = c("direction", "measurement_nr","date", "time", "weather", "cage", "filter"),
+                                                           names_sep = "_",
+                                                           values_to = "irradiance") %>% 
+  mutate(across(c(direction, date, weather, cage, filter, measurement_nr), factor))
+
+#write.csv2(Light_measure_long,'~/Documents/Manuscript_UV_Oviposition/Raw_files/"Light_measure_long.csv')
+# Take average from 3 measurements
+Light_measure_agg <- Light_measure_long %>%  group_by(wl, direction, date, weather, cage, filter) %>%
+  summarize(irradiance = mean(irradiance))
+## Make summary of weather, treatment, direction----
+directions_order <- c("down", "left", "out", "in", "right")
+weather_order <- c("overcast", "over50", "under50")
+
+
+Light_weather <- Light_measure_long %>%  group_by(wl, direction, weather, filter) %>%
+  summarize(irradiance_avg = mean(irradiance), 
+            irradiance_std = sd(irradiance),
+            irradiance_se = sd(irradiance)/length(irradiance),
+            irradiance_upper = irradiance_avg + sd(irradiance)/length(irradiance),
+            irradiance_lower =  irradiance_avg - sd(irradiance)/length(irradiance))  %>%
+  dplyr::mutate(direction = factor(direction, levels = directions_order)) %>%
+  dplyr::mutate(weather = factor(weather, levels = weather_order))
+
+summary(Light_weather)
+## UV filtering all directions ----
+
+filtercolors_no <- c("grey", "darkorchid3")
+
+# Modify the names of the levels for direction and weather
+direction_labels <- c("Downwelling", "Sidewelling left", "Sidewelling out", "Sidewelling in", "Sidewelling right")
+weather_labels <- c("overcast (100% cloud cover)", "cloudy (>50% c.c.)", "sunny (<50% c.c.)")
+
+Light_weather_uv_directions <- Light_weather %>%
+  filter(wl <= 395, filter != "no") %>%
+  ggplot(aes(x = wl, y = irradiance_avg, col = filter)) +
+  geom_line() +
+  scale_color_manual(values = filtercolors_no) +
+  scale_x_continuous(name = "Wavelength (nm)", limits = c(295, 405), breaks = seq(300, 400, by = 30)) +
+  scale_y_continuous(
+    name = expression(bold("Light intensity " ~ "µmol/m"^2 ~ s)),  # Updated y-axis label with bold formatting
+    labels = function(x) format(x, scientific = FALSE)  # Prevent scientific notation on y-axis tick labels
+  ) +
+  theme(legend.key = element_blank()) +
+  theme(plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm")) +
+  stat_wl_strip(ymin = -Inf, ymax = -0.025) +
+  scale_fill_identity() +
+  theme(
+    legend.position = c(0.73, 0.95),
+    legend.background = element_rect(colour = 'grey50'),
+    legend.title = element_text(size = 9),
+    legend.key.size = unit(0.45, "cm"),
+    legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm"), strip.background = element_blank(), 
+    strip.text.x = element_text(size = 10),
+    strip.text.y = element_text(size = 10)
+  ) +
+  geom_ribbon(aes(ymax = irradiance_upper, ymin = irradiance_lower), alpha = 0.5) +
+  facet_grid(vars(factor(direction, labels = direction_labels)), vars(factor(weather, labels = weather_labels)), scales = "free")
+
+Light_weather_uv_directions
+
+Supplementary_4 <- Light_weather_uv_directions
+
+Supplementary_4
+
+# Save the plot with high DPI
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_4.pdf",
+       plot = Supplementary_4, width = 210, height = 297 , units = "mm",
+       dpi = 500)
+```
+
+## 1.10 Supplementary Figure 5: Average time to first egg and first attempt
+```{r Supplementary Figure 5}
+## First attempt egg ----
+First_egg <- Oviposition %>% 
+  dplyr::filter( First_egg_minutes != "NA") %>%  
+  mutate( egg_minutes_transormed = log10(First_egg_minutes),
+          attempt_minutes_transormed = log10(First_attempt_minutes))
+## First attempt egg summary ----
+First_egg_summary <- First_egg %>% 
+  group_by(Treatment, Species) %>% 
+  summarise(mean_attempt_minutes = mean(First_attempt_minutes, na.rm = T),
+            se_attempt_minutes = sd(First_attempt_minutes, na.rm = T)/length(First_attempt_minutes),
+            mean_egg_minutes = mean(First_egg_minutes, na.rm = T),
+            se_egg_minutes = sd(First_egg_minutes, na.rm = T)/length(First_egg_minutes))
+## Supplementary barplot first attempt & egg  ----
+attempt_latency_barplot <- First_egg_summary %>%
+  ggplot(aes(x= Species, y= mean_attempt_minutes, 
+             ymax = mean_attempt_minutes + se_attempt_minutes, 
+             ymin = mean_attempt_minutes - se_attempt_minutes,
+             fill= Treatment)) +
+  theme(legend.position = c(0.05, 0.80),
+        legend.background = element_rect(colour = 'grey50'),
+        legend.title = element_text(size = 9),
+        legend.key.size = unit(0.6, "cm"),
+        legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm")) +
+  geom_bar(stat="identity", position = "dodge") +
+  geom_errorbar(position = "dodge") + 
+  scale_y_continuous(name="Average time to frist attempt") +
+  scale_x_discrete(labels = c(expression(italic("H. e. cyrbia")), expression(italic("H. himera")))) +
+  scale_fill_manual(values= cl_uv)
+
+egg_latency_barplot <- First_egg_summary %>%
+  ggplot(aes(x= Species, y= mean_egg_minutes, 
+             ymax = mean_egg_minutes + se_egg_minutes, 
+             ymin = mean_egg_minutes - se_egg_minutes,
+             fill= Treatment)) +
+  geom_bar(stat="identity", position = "dodge") +
+  geom_errorbar(position = "dodge") + 
+  scale_x_discrete(labels = c(expression(italic("H. e. cyrbia")), expression(italic("H. himera")))) +
+  scale_y_continuous(name="Average time to frist egg") +
+  scale_fill_manual(values= cl_uv) +
+  theme(legend.position = c("none"),
+        legend.background = element_rect(colour = 'grey50'),
+        legend.title = element_text(size = 9),
+        legend.key.size = unit(0.6, "cm"),
+        legend.margin = margin(t = 0.1, r = 0.1, b = 0.1, l = 0.1, unit = "cm"))
+
+
+Supplementary_5 <- ggdraw() + draw_plot(attempt_latency_barplot, x= 0 , y= 0.5, width = 1, height = 0.5) + draw_plot(egg_latency_barplot, x= 0 , y= 0, width = 1, height = 0.5) + draw_plot_label(c("A","B"), x = c(0.02, 0.02), y = c(0.98, 0.5), size=15, vjust=1 )
+
+Supplementary_5
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_5.pdf",
+       plot = Supplementary_5, width = 210, height = 210, units = "mm",
+       dpi = 500)
+
+```
+
+## 1.11 Supplementary Figure 6: Egg count per treatment by individual. Females marked with C represent H. erato cyrbia while H. himera individuals are represented with an H. 
+```{r Supplementary Figure 6}
+## Per week individual ----
+Oviposition_week <- Oviposition %>% filter(Attempt != "NA") %>%
+  group_by(Cohort, Group, Cage, Enviroment, Treatment, Species, Individual) %>%
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            mean_attempt = mean(Attempt, na.rm = T),
+            sd_attempt = sd(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T),
+            mean_egg = mean(Egg, na.rm = T),
+            sd_egg = sd(Egg, na.rm = T),
+            mean_first_attempt = mean(First_attempt_minutes, na.rm = T),
+            mean_first_egg = mean(First_egg_minutes, na.rm = T))  %>% 
+  mutate(Egg_attempt = sum_egg/sum_attempt) %>% 
+  arrange(Cohort, Group, Individual)
+## Supplementary egg individual ----
+Egg_count_individual <- Oviposition_week %>% 
+  ggplot(aes(x= Treatment, y= sum_egg, fill= Treatment)) + geom_bar(stat="identity", position = "dodge") +
+  scale_fill_manual(values= cl_uv) + 
+  theme(legend.position="none") +
+  scale_y_continuous(name="Egg number") +
+  facet_wrap(~Individual)
+Egg_count_individual
+
+Supplementary_6 <- Egg_count_individual
+
+ggsave("/Users/jabm/Documents/Manuscript_UV_oviposition/Figures_UV_manuscript/Supplementary_6.pdf",
+       plot = Supplementary_6, width = 210, height = 297, units = "mm",
+       dpi = 500)
+
+
+```
+
+# 2 Statistical analyses
+All statistical analyses were carried out in R using the following packages and datasets:
+```{r Datasets}
+# Load required packages ----
+# Instructions for GLMMs ----
+# 1 Plot raw data to get an idea
+# 2 Generate model
+# 3 Check for error distribution (famliy)
+# 4 Check for overdispersion
+# 5 Check for model random effect structure AIC
+# 6 Check for the predictor variable with drop1 command
+# 7 Parametric bootstraping for p-value
+# 8 post hoc test with emeans to find effects of predictor variable
+
+#Load UV_Oviposition dataset ----
+Oviposition <- read.csv2("~/Documents/Manuscript_UV_oviposition/Raw_files/UV_oviposition.csv", header = T, stringsAsFactors = T, sep=",") %>% 
+  mutate_at(c("Cohort", "Cage"), factor)
+
+summary(Oviposition)
+str(Oviposition)
+head(Oviposition)
+# Per day attempt and egg count per individual ----
+Oviposition_day <- Oviposition %>% 
+  filter(Attempt != "NA") %>% # Filter out where no individual or attempt
+  group_by(Date, Day, Cohort, Group,Cage, Enviroment, Weather, Treatment, Species, Individual) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T)) %>% 
+  mutate(Egg_attempt = (sum_egg/ sum_attempt),
+         T = sum_egg,
+         F = (sum_attempt- sum_egg)) %>%
+  arrange(Group, Cohort, Individual, Date)
+
+str(Oviposition_day)
+summary(Oviposition_day)
+head(Oviposition_day)
+
+#write_csv2(Oviposition_day,"~/Documents/Manuscript_UV_oviposition/Raw_files/Oviposition_day.csv")
+## Summarize per plantpart and day total attempt and egg count per individual ----
+#use this for modeL
+Oviposition_part_ind <- Oviposition %>% 
+  dplyr::filter(Plant_part != "NA", Attempt != "NA") %>%  # Filter out where no plant part
+  group_by(Cohort, Group, Cage, Enviroment, Treatment, Weather, Species, Individual, Plant_part) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            mean_attempt = mean(Attempt, na.rm = T),
+            sd_attempt = sd(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T),
+            mean_egg = mean(Egg, na.rm = T),
+            sd_egg = sd(Egg, na.rm = T),
+            mean_first_attempt = mean(First_attempt_minutes, na.rm = T),
+            mean_first_egg = mean(First_egg_minutes, na.rm = T))  %>% 
+  mutate(Egg_attempt = sum_egg/sum_attempt) %>% 
+  arrange(Individual, Plant_part, Treatment)
+
+
+# A) Diferent dataframe GLMM att_succes_fail per treatment----
+Oviposition_day_1 <- Oviposition %>% 
+  filter(Attempt != "NA") %>% # Filter out where no individual or attempt
+  group_by(Date, Day, Cohort, Group,Cage, Enviroment, Weather, Treatment, Species, Individual) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T)) %>% 
+  mutate(Egg_attempt = (sum_egg/ sum_attempt),
+         att_succes = sum_egg,
+         att_fail = (sum_attempt- sum_egg)) %>%
+  arrange(Group, Cohort, Individual, Date)
+## 4 Overdispersion check ----
+### 4.1 Generate overdispersion function ----
+overdisp <- function(model) {
+  vpars <- function(m) {
+    nrow(m)*(nrow(m)+1)/2
+  }
+  model.df <- sum(sapply(VarCorr(model),vpars))+length(fixef(model))
+  (rdf <- nrow(model@frame)-model.df)
+  rp <- residuals(model)
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE,log.p=TRUE)
+  c(chisq=Pearson.chisq,ratio=prat,p=exp(pval))
+}
+```
+## 2.1 GLMM attempt per treatment, weather, species:
+```{r attempt_count}
+# A) GLMM attempt per treatment
+## 1 Plot raw data to get an idea  ----
+ggplot(Oviposition_day, aes(sum_attempt, color= Individual)) +
+  geom_histogram(binwidth=.5, position="dodge")
+hist(Oviposition_day$sum_attempt)
+## 2 Generate model ----
+attempt_treatment <- glmer(sum_attempt ~ Treatment * Weather  * Species + (1|Individual) 
+                           + (1|Day), data = Oviposition_day, family = poisson)
+## 3 Check for error distribution (famliy) ----
+plot(attempt_treatment)
+## 4 Overdispersion check ----
+### 4.2 overdispersion ----
+overdisp(attempt_treatment)
+# overdispersed 
+### 4.3 Replace  model with negative binomial  ----
+attempt_treatment_nb <- glmer.nb(sum_attempt ~Treatment * Weather * Species  + 
+                                   (1|Individual)+(1|Day), data = Oviposition_day)
+### 4.4 AIC Compare poisson vs negative binomial models ----
+AIC(attempt_treatment, attempt_treatment_nb) 
+#go with model where AIC is at least > 4 less 
+# in this case go with attempt_treatment_nb
+## 5 Random effect structure AIC  ----
+# Reduce model and check with AIC
+attempt_treatment_nb1 <- glmer.nb(sum_attempt ~Treatment * Weather * Species  + 
+                                   (1|Individual), data = Oviposition_day)
+attempt_treatment_nb2 <- glmer.nb(sum_attempt ~Treatment * Weather * Species  
+                                 +(1|Day), data = Oviposition_day)
+AIC(attempt_treatment_nb, attempt_treatment_nb1, attempt_treatment_nb2)
+#go with model where AIC is at least > 4 less 
+#in this case full model
+## 6 Predictor variable with drop1 command ----
+drop1(attempt_treatment_nb, test = "Chisq")
+attempt_treatment_nb_1 <- update(attempt_treatment_nb,.~. -Treatment:Weather:Species)
+drop1(attempt_treatment_nb_1, test = "Chisq")
+attempt_treatment_nb_2 <- update(attempt_treatment_nb_1,.~. -Treatment:Species)
+drop1(attempt_treatment_nb_2, test = "Chisq")
+attempt_treatment_nb_3 <- update(attempt_treatment_nb_2,.~. -Treatment:Weather)
+drop1(attempt_treatment_nb_3, test = "Chisq")
+attempt_treatment_nb_4 <- update(attempt_treatment_nb_3,.~. -Weather:Species)
+drop1(attempt_treatment_nb_4, test = "Chisq")
+attempt_treatment_nb_5 <- update(attempt_treatment_nb_4,.~. -Species)
+drop1(attempt_treatment_nb_5, test = "Chisq")
+attempt_treatment_nb_6 <- update(attempt_treatment_nb_5,.~. -Treatment)
+drop1(attempt_treatment_nb_6, test = "Chisq")
+# now this should be the final model
+# minimum adequate model that describes the variation in the data
+# stepwise model reduction based on significance 
+# check AIC model with Weather + random effects vs. model only with random effects
+attempt_treatment_nb_7 <- update(attempt_treatment_nb_6,.~. -Weather)
+#weather effect
+anova(attempt_treatment_nb_6, attempt_treatment_nb_7)
+#treatment effect
+attempt_treatment_nb_8 <- update(attempt_treatment_nb_6,.~. + Treatment)
+anova(attempt_treatment_nb_8, attempt_treatment_nb_6)
+#species effect
+attempt_treatment_nb_9 <- update(attempt_treatment_nb_6,.~. + Species)
+anova(attempt_treatment_nb_9, attempt_treatment_nb_6)
+## 7 Parametric bootrstraping this is the p-value to report  ----
+### p-value weather ----
+PBmodcomp(attempt_treatment_nb_6, attempt_treatment_nb_7, nsim=10, cl=1)
+
+weather_attempts_emms <- emmeans(attempt_treatment_nb_6, "Weather")
+
+eff_size(weather_attempts_emms, sigma = sigma(attempt_treatment_nb_6), edf = Inf) #Effect size for weather
+### p-value treatment ----
+PBmodcomp(attempt_treatment_nb_8, attempt_treatment_nb_6, nsim=10, cl=1)
+
+treatment_attempts_emms <- emmeans(attempt_treatment_nb_8, "Treatment")
+eff_size(treatment_attempts_emms, sigma = sigma(attempt_treatment_nb_8), edf = Inf) #Effect size for treatment
+### p-value species ----
+PBmodcomp(attempt_treatment_nb_9, attempt_treatment_nb_6, nsim=10, cl=1)
+
+species_attempts_emms <- emmeans(attempt_treatment_nb_9, "Species")
+eff_size(species_attempts_emms, sigma = sigma(attempt_treatment_nb_8), edf = Inf) #Effect size for species
+## 8 Post hoc test with minimum adecuate model using emmeans package ----
+plot(allEffects(attempt_treatment_nb_6))
+emmeans(object = attempt_treatment_nb_6,
+        specs = pairwise ~Weather)
+### p-value weather post hoc 
+### this are the p-values to report for weather categories ----
+#plot with stars, dots, etc
+emmeans(
+  object = attempt_treatment_nb_6,
+  specs = pairwise ~ Weather,
+  regrid = "response"
+)
+
+plot(emmeans(object = attempt_treatment_nb_6,
+             specs =  pairwise ~Weather,
+             regrid="response"), comparisons = TRUE)
+
+print(plot(emmeans(object = attempt_treatment_nb_6,
+             specs =  pairwise ~Weather,
+             regrid="response"), comparisons = TRUE))
+
+
+(EMM_egg_treatment_nb_6 <-summary(emmeans(object = attempt_treatment_nb_6,
+                                          specs = pairwise ~Weather,
+                                          regrid = "response")))
+
+weather_emms <- emmeans(attempt_treatment_nb_6, "Weather")
+
+eff_size(weather_emms, sigma = sigma(attempt_treatment_nb_6), edf = Inf) #Effect size for weather
+
+
+```
+## 2.2 GLMM egg per treatment, weather, species:
+```{r egg_count}
+# A) GLMM egg per treatment----
+## 1 Plot raw data to get an idea  ----
+ggplot(Oviposition_day, aes(sum_egg, color= Individual)) +
+  geom_histogram(binwidth=.5, position="dodge")
+hist(Oviposition_day$sum_egg)
+## 2 Generate model ----
+egg_treatment <- glmer(sum_egg ~ Treatment * Weather * Species +
+                         (1|Individual) + (1|Day), data = Oviposition_day, family = poisson)
+## 3 Check for error distribution (famliy) ----
+plot(egg_treatment)
+## 4 Overdispersion check ----
+### 4.2 overdispersion ----
+overdisp(egg_treatment)
+# overdispersed 
+### 4.3 Replace  model with negative binomial  ----
+egg_treatment_nb <- glmer.nb(sum_egg~Treatment * Weather * Species +
+                               (1|Individual)+(1|Day), data = Oviposition_day)
+### 4.4 AIC Compare poisson vs negative binomial models ----
+AIC(egg_treatment, egg_treatment_nb)
+#go with model where AIC is at least > 4 less 
+# in this case go with egg_treatment_nb
+## 5 Random effect structure AIC  ----
+# Reduce model and check with AIC
+egg_treatment_nb1 <- glmer.nb(sum_egg~Treatment * Weather * Species + 
+                                (1|Individual), data = Oviposition_day)
+egg_treatment_nb2 <- glmer.nb(sum_egg~Treatment * Weather * Species + 
+                                (1|Day), data = Oviposition_day) #dont even test this model because of pseudoreplication
+AIC(egg_treatment_nb, egg_treatment_nb1, egg_treatment_nb2) 
+#go with model where AIC is at least > 4 less 
+#in this case full model
+## 6 Predictor variable with drop1 command ----
+#Allways remove double interactions first
+hist(resid(egg_treatment_nb)) #check the residuals are normaly distributed
+drop1(egg_treatment_nb, test = "Chisq")
+egg_treatment_nb_1 <- update(egg_treatment_nb,.~. -Treatment:Weather:Species)
+drop1(egg_treatment_nb_1, test = "Chisq")
+egg_treatment_nb_2 <- update(egg_treatment_nb_1,.~. -Treatment:Species)
+drop1(egg_treatment_nb_2, test = "Chisq")
+egg_treatment_nb_3 <- update(egg_treatment_nb_2,.~. -Weather:Species)
+drop1(egg_treatment_nb_3, test = "Chisq")
+egg_treatment_nb_4 <- update(egg_treatment_nb_3,.~. -Treatment:Weather)
+drop1(egg_treatment_nb_4, test = "Chisq")
+egg_treatment_nb_5 <- update(egg_treatment_nb_4,.~. -Species)
+drop1(egg_treatment_nb_5, test = "Chisq")
+egg_treatment_nb_6 <- update(egg_treatment_nb_5,.~. -Treatment)
+drop1(egg_treatment_nb_6, test = "Chisq")
+hist(resid(egg_treatment_nb_6))
+plot(egg_treatment_nb_6)
+# now this should be the final model
+# minimum adequate model that describes the variation in the data
+# stepwise model reduction based on significance 
+# check AIC model with Weather + random effects vs. model only with random effects
+egg_treatment_nb_7 <- update(egg_treatment_nb_6,.~. -Weather)
+#Do anova test of model with weather vs mododel with only random effects
+#effect weather
+anova(egg_treatment_nb_6, egg_treatment_nb_7)
+#still lower AIC and less parametriced model so keep egg_treatment_nb_6
+#effect treament
+egg_treatment_nb_8 <- update(egg_treatment_nb_6,.~. + Treatment)
+anova(egg_treatment_nb_8, egg_treatment_nb_6)
+#effect species
+egg_treatment_nb_9 <- update(egg_treatment_nb_6,.~. + Species)
+anova(egg_treatment_nb_9, egg_treatment_nb_6)
+## 7 Parametric bootrstraping this is the p-value to report  ----
+### p-value weather ----
+PBmodcomp(egg_treatment_nb_6, egg_treatment_nb_7, nsim=10, cl=1)
+
+weather_egg_emms <- emmeans(egg_treatment_nb_6, "Weather")
+eff_size(weather_egg_emms, sigma = sigma(egg_treatment_nb_6), edf = Inf) #Effect size for  weather
+
+### p-value treatment ----
+PBmodcomp(egg_treatment_nb_8, egg_treatment_nb_6, nsim=10, cl=1)
+
+treatment_egg_emms <- emmeans(egg_treatment_nb_8, "Treatment")
+eff_size(treatment_egg_emms, sigma = sigma(egg_treatment_nb_8), edf = Inf) #Effect size for  treatment
+### p-value species ----
+PBmodcomp(egg_treatment_nb_9, egg_treatment_nb_6, nsim=10, cl=1)
+
+species_egg_emms <- emmeans(egg_treatment_nb_9, "Species")
+eff_size(species_egg_emms, sigma = sigma(egg_treatment_nb_9), edf = Inf) 
+## 8 Post hoc test with minium addecuate model using emmeans package ----
+emmeans(object = egg_treatment_nb_6,
+        specs = pairwise ~Weather)
+### p-value weather post hoc ----
+### this are the p-values to report for weather categories ----
+#plot with stars, dots, etc
+emmeans(object = egg_treatment_nb_6,
+        specs = pairwise ~Weather,
+        regrid = "response")
+
+plot(emmeans(object = egg_treatment_nb_6,
+             specs =  pairwise ~Weather,
+             regrid="response"), comparisons = TRUE)
+
+```
+## 2.3 GLMM attempt per plant part:
+```{r attempt_part}
+# B) GLMM Attempts per plant part ----
+## 1 Plot raw data to get an idea  ----
+ggplot(Oviposition_part_ind, aes(sum_attempt, color= Individual)) +
+  geom_histogram(binwidth=.5, position="dodge")
+hist(Oviposition_part_ind$sum_attempt)
+## 2 Generate model ----
+att_part_treatment <- glmer(sum_attempt ~ Plant_part * Treatment * Weather * Species + 
+                          (1|Individual), data = Oviposition_part_ind, family = poisson)
+## 3 Check for error distribution (famliy) ----
+plot(att_part_treatment)
+## 4 Overdispersion check ----
+### 4.2 overdispersion ----
+overdisp(att_part_treatment)
+### 4.3 Replace  model with negative binomial  ----
+att_part_treatment_nb <- glmer.nb( sum_attempt ~ Plant_part * Treatment * Weather * Species + 
+                                 (1|Individual), data = Oviposition_part_ind)
+### 4.4 AIC Compare poisson vs negative binomial models ----
+AIC(att_part_treatment, att_part_treatment_nb) 
+#go with model where AIC is at least > 4 less 
+# in this case go with att_part_treatment_nb
+## 5 Random effect structure AIC  ----
+# Reduce model and check with AIC
+att_part_treatment_nb1 <- glm( sum_attempt ~ Plant_part * Treatment * Weather * Species,
+                                    data = Oviposition_part_ind)
+AIC(att_part_treatment_nb, att_part_treatment_nb1)  
+#go with model where AIC is at least > 4 less 
+#in this case stay with full model
+## 6 Predictor variable with drop1 command ----
+summary(att_part_treatment_nb)
+plot(att_part_treatment_nb)
+drop1(att_part_treatment_nb, test = "Chisq")
+att_part_treatment_nb_1 <- update(att_part_treatment_nb,.~. -Plant_part:Treatment:Weather:Species)
+drop1(att_part_treatment_nb_1, test = "Chisq")
+att_part_treatment_nb_2 <- update(att_part_treatment_nb_1,.~. -Plant_part:Treatment:Species)
+drop1(att_part_treatment_nb_2, test = "Chisq")
+att_part_treatment_nb_3 <- update(att_part_treatment_nb_2,.~. -Treatment:Weather:Species)
+drop1(att_part_treatment_nb_3, test = "Chisq")
+att_part_treatment_nb_4 <- update(att_part_treatment_nb_3,.~. -Plant_part:Weather:Species)
+drop1(att_part_treatment_nb_4, test = "Chisq")
+att_part_treatment_nb_5 <- update(att_part_treatment_nb_4,.~. -Plant_part:Treatment:Weather)
+drop1(att_part_treatment_nb_5, test = "Chisq")
+att_part_treatment_nb_6 <- update(att_part_treatment_nb_5,.~. -Plant_part:Treatment)
+drop1(att_part_treatment_nb_5, test = "Chisq")
+att_part_treatment_nb_6 <- update(att_part_treatment_nb_5,.~. -Plant_part:Treatment)
+drop1(att_part_treatment_nb_6, test = "Chisq")
+att_part_treatment_nb_7 <- update(att_part_treatment_nb_6,.~. -Plant_part:Species)
+drop1(att_part_treatment_nb_7, test = "Chisq")
+att_part_treatment_nb_8 <- update(att_part_treatment_nb_7,.~. -Treatment:Weather)
+drop1(att_part_treatment_nb_8, test = "Chisq")
+att_part_treatment_nb_9 <- update(att_part_treatment_nb_8,.~. -Treatment:Species)
+drop1(att_part_treatment_nb_9, test = "Chisq")
+att_part_treatment_nb_10 <- update(att_part_treatment_nb_9,.~. -Plant_part:Weather)
+drop1(att_part_treatment_nb_10, test = "Chisq")
+att_part_treatment_nb_11 <- update(att_part_treatment_nb_10,.~. -Weather:Species)
+drop1(att_part_treatment_nb_11, test = "Chisq")
+att_part_treatment_nb_12 <- update(att_part_treatment_nb_11,.~. -Weather)
+drop1(att_part_treatment_nb_12, test = "Chisq")
+att_part_treatment_nb_13 <- update(att_part_treatment_nb_12,.~. -Treatment)
+drop1(att_part_treatment_nb_13, test = "Chisq")
+att_part_treatment_nb_14 <- update(att_part_treatment_nb_13 ,.~. -Species)
+drop1(att_part_treatment_nb_14, test = "Chisq")
+# now this should be the final model
+# minimum adequate model that describes the variation in the data
+# stepwise model reduction based on significance 
+# check AIC model with Plant_part + random effects vs. model only with random effects
+att_part_treatment_nb_15 <- update(att_part_treatment_nb_14,.~. -Plant_part)
+#Do anova test of model with plant_part vs model with only random effects
+anova(att_part_treatment_nb_14, att_part_treatment_nb_15)
+#still lower AIC and less parametriced model so keep att_part_treatment_nb_14
+#effect treatment
+att_part_treatment_nb_16 <- update(att_part_treatment_nb_15,.~. + Treatment)
+anova(att_part_treatment_nb_16, att_part_treatment_nb_15)
+#effect weather
+att_part_treatment_nb_17 <- update(att_part_treatment_nb_15,.~. + Weather)
+anova(att_part_treatment_nb_17, att_part_treatment_nb_15)
+# effect species
+att_part_treatment_nb_18 <- update(att_part_treatment_nb_15,.~. + Species)
+anova(att_part_treatment_nb_18, att_part_treatment_nb_15)
+## 7 Parametric bootrstraping this is the p-value to report  ----
+### this is the p-value to report for plant_part ---
+PBmodcomp(att_part_treatment_nb_14, att_part_treatment_nb_15, nsim=1000, cl=1)
+### this is the p-value to report for treatment ----
+PBmodcomp(att_part_treatment_nb_16, att_part_treatment_nb_15, nsim=1000, cl=1)
+### this is the p-value to report for weahter ----
+PBmodcomp(att_part_treatment_nb_17, att_part_treatment_nb_15, nsim=1000, cl=1)
+### this is the p-value to report for species ----
+PBmodcomp(att_part_treatment_nb_18, att_part_treatment_nb_15, nsim=100, cl=1)
+
+## 8 Get EMMs with final model using emmeans package ----
+emmeans(object = att_part_treatment_nb_14,
+        specs = pairwise ~ Plant_part)
+emmeans(object = att_part_treatment_nb_14,
+        specs = pairwise ~ Plant_part,
+        regrid = "response")
+# the difference between shoot and any other plant part is significantly different
+plot(emmeans(object = att_part_treatment_nb_14,
+             specs =  pairwise ~ Plant_part,
+             regrid ="response"), comparisons = TRUE)
+plot(allEffects(att_part_treatment_nb_14))
+ 
+```
+## 2.4 GLMM egg per plant part:
+```{r egg_part}
+#B )GLMM Eggs per plant part ----
+## Summarize per plantpart and day total attempt and egg count per individual ----
+#use this for modeL
+Oviposition_part_ind <- Oviposition %>% 
+  dplyr::filter(Plant_part != "NA", Attempt != "NA") %>%  # Filter out where no plant part
+  group_by(Cohort, Group, Cage, Enviroment, Treatment, Weather, Species, Individual, Plant_part) %>% 
+  summarise(sum_attempt = sum(Attempt, na.rm = T),
+            mean_attempt = mean(Attempt, na.rm = T),
+            sd_attempt = sd(Attempt, na.rm = T),
+            sum_egg = sum(Egg, na.rm = T),
+            mean_egg = mean(Egg, na.rm = T),
+            sd_egg = sd(Egg, na.rm = T),
+            mean_first_attempt = mean(First_attempt_minutes, na.rm = T),
+            mean_first_egg = mean(First_egg_minutes, na.rm = T))  %>% 
+  mutate(Egg_attempt = sum_egg/sum_attempt) %>% 
+  arrange(Individual, Plant_part, Treatment)
+str(Oviposition_part_ind)
+summary(Oviposition_part_ind)
+## 1 Plot raw data to get an idea  ----
+ggplot(Oviposition_part_ind, aes(sum_egg, color= Individual)) +
+  geom_histogram(binwidth=.5, position="dodge")
+hist(Oviposition_part_ind$sum_egg)
+## 2 Generate model ----
+part_treatment <- glmer(sum_egg ~ Plant_part * Treatment * Species * Weather + 
+                          (1|Individual) , data = Oviposition_part_ind, family = poisson)
+## 3 Check for error distribution (famliy) ----
+plot(part_treatment)
+## 4 Overdispersion check ----
+### 4.2 overdispersion ----
+overdisp(part_treatment)
+# model not overdispersed as here plant_part only a subset of the values without so many zeroes thus not overdispersed
+# and not necessary to make a negative binomial model 
+## 5 Random effect structure AIC  ----
+# Reduce model and check with AIC
+part_treatment1<- glm(sum_egg ~ Plant_part * Treatment * Species * Weather,
+                      data = Oviposition_part_ind, family = poisson)
+AIC(part_treatment, part_treatment1) 
+#go with model where AIC is at least > 4 less 
+#in this case stay with full model
+## 6 Predictor variable with drop1 command ----
+drop1(part_treatment, test = "Chisq")
+part_treatment_1 <- update(part_treatment,.~. -Plant_part:Treatment:Species:Weather)
+drop1(part_treatment_1, test="Chisq")
+part_treatment_2 <- update(part_treatment_1,.~. -Treatment:Species:Weather)
+drop1(part_treatment_2, test="Chisq")
+part_treatment_3 <- update(part_treatment_2,.~. -Plant_part:Species:Weather)
+drop1(part_treatment_3, test="Chisq")
+part_treatment_4 <- update(part_treatment_3,.~. -Plant_part:Treatment:Weather)
+drop1(part_treatment_4, test="Chisq")
+part_treatment_5 <- update(part_treatment_4,.~. -Plant_part:Treatment:Species)
+drop1(part_treatment_5, test="Chisq")
+part_treatment_6 <- update(part_treatment_5,.~. -Plant_part:Treatment)
+drop1(part_treatment_6, test="Chisq")
+part_treatment_7 <- update(part_treatment_6,.~. -Plant_part:Weather)
+drop1(part_treatment_7, test="Chisq")
+part_treatment_8 <- update(part_treatment_7,.~. -Species:Weather)
+drop1(part_treatment_8, test="Chisq")
+part_treatment_9 <- update(part_treatment_8,.~. -Treatment:Species)
+drop1(part_treatment_9, test="Chisq")
+part_treatment_10 <- update(part_treatment_9,.~. -Treatment:Weather)
+drop1(part_treatment_10, test="Chisq")
+part_treatment_11 <- update(part_treatment_10,.~. -Plant_part:Species)
+drop1(part_treatment_11, test="Chisq")
+part_treatment_12 <- update(part_treatment_11,.~. -Treatment)
+drop1(part_treatment_12, test="Chisq")
+part_treatment_13 <- update(part_treatment_12,.~. -Species)
+drop1(part_treatment_13, test="Chisq")
+part_treatment_14 <- update(part_treatment_13,.~. -Weather)
+drop1(part_treatment_14, test="Chisq")
+# now this should be the final model
+# minimum adequate model that describes the variation in the data
+# stepwise model reduction based on significance 
+# check AIC model with Plant_part + random effects vs. model only with random effects
+part_treatment_15 <- update(part_treatment_14,.~. -Plant_part)
+#Do anova test of model with plant_part vs model with only random effects
+anova(part_treatment_14, part_treatment_15)
+#still lower AIC and less parametriced model so keep part_treatment_14
+part_treatment_16 <- update(part_treatment_15,.~. + Treatment)
+anova(part_treatment_16, part_treatment_15)
+#this is the p-value to report for treatment
+part_treatment_17 <- update(part_treatment_15,.~. + Weather)
+anova(part_treatment_17, part_treatment_15)
+#this is the p-value to report for Weather
+part_treatment_18 <- update(part_treatment_15,.~. + Species)
+anova(part_treatment_18, part_treatment_15)
+#this is the p-value to report for Species
+## 7 Parametric bootrstraping this is the p-value to report  ----
+### p-value plant_part ---
+PBmodcomp(part_treatment_14, part_treatment_15, nsim=1000, cl=1)
+### this is the p-value to report for plant_part ---
+PBmodcomp(part_treatment_16, part_treatment_15, nsim=1000, cl=1)
+### this is the p-value to report for treatment ----
+PBmodcomp(part_treatment_17, part_treatment_15, nsim=1000, cl=1)
+### this is the p-value to report for weahter ----
+PBmodcomp(part_treatment_18, part_treatment_15, nsim=1000, cl=1)
+### this is the p-value to report for species ----
+## 8 Get EMMs with final model using emmeans package ----
+emmeans(object = part_treatment_14,
+        specs = pairwise ~ Plant_part)
+### p-value plant_part  post hoc---
+emmeans(object = part_treatment_14,
+        specs = pairwise ~ Plant_part,
+        regrid = "response")
+plot(emmeans(object = part_treatment_14,
+             specs =  pairwise ~ Plant_part,
+             regrid ="response"), comparisons = TRUE)
+```
+## 2.5 LMM First attempt 
+```{r First_attempt}
+# First attempt model ----
+## 1 Plot raw data to get an idea  ----
+hist(First_egg$First_attempt_minutes)
+hist(First_egg$attempt_minutes_transormed)
+## 2 Generate model ----
+mod_first_attempt_treatment <- lmer(attempt_minutes_transormed ~ Treatment + (1|Individual), data = First_egg)
+mod_first_attempt_species <- lmer(attempt_minutes_transormed ~ Species + (1|Individual), data = First_egg)
+mod_first_attempt_weather <- lmer(attempt_minutes_transormed ~ Weather + (1|Individual), data = First_egg)
+mod_first_attempt_0 <- update(mod_first_attempt_treatment,.~. -Treatment)
+## 3 Check for error distribution (famliy) ----
+resid_panel(mod_first_attempt_treatment)
+resid_panel(mod_first_attempt_species)
+resid_panel(mod_first_attempt_weather)
+## 4 LRT model with treatment + random effects vs. model only with random effects
+anova(mod_first_attempt_treatment, mod_first_attempt_0)
+anova(mod_first_attempt_species, mod_first_attempt_0)
+anova(mod_first_attempt_weather, mod_first_attempt_0)
+```
+## 2.6 LMM First egg 
+```{r First_egg}
+# First egg model ----
+## 1 Plot raw data to get an idea  ----
+hist(First_egg$First_egg_minutes)
+hist(First_egg$egg_minutes_transormed)
+## 2 Generate model ----
+mod_first_egg_treatment <- lmer(egg_minutes_transormed ~ Treatment + (1|Individual), data = First_egg)
+mod_first_egg_species <- lmer(egg_minutes_transormed ~ Species + (1|Individual), data = First_egg)
+mod_first_egg_weather <- lmer(egg_minutes_transormed ~ Weather + (1|Individual), data = First_egg)
+mod_first_egg_0 <- update(mod_first_egg_treatment,.~. -Treatment)
+## 3 Check for error distribution (famliy) ----
+resid_panel(mod_first_egg_treatment)
+resid_panel(mod_first_egg_species)
+resid_panel(mod_first_egg_weather)
+## 4 LRT model with treatment + random effects vs. model only with random effects
+anova(mod_first_egg_treatment, mod_first_egg_0)
+anova(mod_first_egg_species, mod_first_egg_0)
+anova(mod_first_egg_weather, mod_first_egg_0)
+### p-value treatment ----
+PBmodcomp(mod_first_egg_treatment, mod_first_egg_0, nsim=100)
+### p-value species ----
+PBmodcomp(mod_first_egg_species, mod_first_egg_0, nsim=100)
+### p-value weather ----
+PBmodcomp(mod_first_egg_weather, mod_first_egg_0, nsim=100)
+```
+## 2.7 Non-parametric tests H. erato egg count
+```{r Erato_egg_cont}
+# Load erato egg data from Panama (Hausmann et al 2023 sexual conflict) (for two days) 
+# select only relevant columns divide by two to get the number of daily eggs
+# multiply 2/7 2h recorded from (roughly) 7 hours active 0900-1600 
+
+# Load erato egg data from Ikiam (per day)
+# multiply 2/7 2h recorded from (roughly) 7 hours active 0900-1600 
+
+# Load erato egg data from UV ovipositon experiment (2h in one day) Oviposition_day
+
+#This was done in Excel for now
+
+egg_count_erato <- read.csv("/Users/jabm/Documents/Manuscript_UV_oviposition/Raw_files/egg_count_erato.csv",
+                       header = T, stringsAsFactors = T) 
+str(egg_count_erato)
+
+# Perform Kruskal-Wallis test
+result <- kruskal.test(sum_egg ~ Location, data = egg_count_erato)
+
+# Print the test result
+print(result)
+
+# Extract the subset of data for Panama and Expcages
+panama_data <- subset(egg_count_erato, Location == "STRI")$sum_egg
+expcages_data <- subset(egg_count_erato, Location == "Expcages")$sum_egg
+
+# Perform Mann-Whitney U test
+result_panama_expcages <- wilcox.test(panama_data, expcages_data)
+print(result_panama_expcages)
+
+
+# Extract the subset of data for Ikiam and Expcages
+ikiam_data <- subset(egg_count_erato, Location == "Ikiam")$sum_egg
+expcages_data <- subset(egg_count_erato, Location == "Expcages")$sum_egg
+
+# Perform Mann-Whitney U test
+result_ikiam_expcages <- wilcox.test(ikiam_data, expcages_data)
+
+# Print the test result
+print(result_ikiam_expcages)
+
+```
+
